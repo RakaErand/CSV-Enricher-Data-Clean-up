@@ -1,0 +1,12 @@
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+port = 8501
+address = "0.0.0.0"
+
+[browser]
+serverAddress = "csv-enricher.mysutro.com"
+serverPort = 443
+gatherUsageStats = false
+
