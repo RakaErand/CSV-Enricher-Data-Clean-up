@@ -138,8 +138,8 @@ if uploaded_files:
         st.warning("Please upload exactly two CSV files.")
     else:
         file1, file2 = uploaded_files
-        df1 = pd.read_csv(file1, delimiter=';', skiprows=0, low_memory=False)
-        df2 = pd.read_csv(file2)
+        df1 = pd.read_csv(file1, sep=None, engine='python')
+        df2 = pd.read_csv(file2, sep=None, engine='python')
 
         df2.columns = [col.replace(".1", "") for col in df2.columns]
 

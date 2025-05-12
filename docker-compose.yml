@@ -3,6 +3,5 @@ services:
   web:
     build: ./app
     ports:
-      - "8502:8501"
+      - "8502:8502"
     restart: always
-
