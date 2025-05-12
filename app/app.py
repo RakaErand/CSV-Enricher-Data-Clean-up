@@ -35,23 +35,23 @@ def normalize(val):
 
 
 def get_signature(row):
-    def get_value(row, *keys):
-        for key in keys:
-            if key in row and not isinstance(row[key], pd.Series):
-                return row[key]
+    fields = [
+        ("first_name", "FirstName"),
+        ("last_name", "LastName"),
+        ("city", "City"),
+        ("state", "State"),
+        ("water_type", "WaterType"),
+    ]
+
+    sig = []
+    for field_opts in fields:
+        value = next((row.get(f) for f in field_opts if f in row), None)
+        sig.append(normalize(value))
+
+    if not any(sig):
         return None
 
-    signature = (
-        normalize(get_value(row, "first_name", "FirstName")),
-        normalize(get_value(row, "last_name", "LastName")),
-        normalize(get_value(row, "PoolVolume", "poolVolume")),
-        normalize(get_value(row, "City")),
-        normalize(get_value(row, "State")),
-        normalize(get_value(row, "WaterType", "water_type")),
-    )
-    if not any(signature):
-        return None
-    return signature
+    return tuple(sig)
 
 
 def enrich_target_with_phones(clean_df, target_df):
@@ -78,13 +78,13 @@ def enrich_target_with_phones(clean_df, target_df):
 
 
 def filter_bak_using_test_flags(bak_df, clean_df):
-    clean_df["has_test_taken"] = clean_df["has_test_taken"].astype(
+    clean_df['has_test_taken'] = clean_df['has_test_taken'].astype(
         str).str.strip().str.lower()
-    clean_df["has_test_taken"] = clean_df["has_test_taken"].isin(
+    clean_df['has_test_taken'] = clean_df['has_test_taken'].isin(
         ['true', '1', 'yes'])
 
     tested_signatures = set(
-        get_signature(row) for _, row in clean_df[clean_df["has_test_taken"]].iterrows()
+        get_signature(row) for _, row in clean_df[clean_df['has_test_taken']].iterrows()
     )
 
     filtered_rows = [row.to_dict() for _, row in bak_df.iterrows()
@@ -138,7 +138,7 @@ if uploaded_files:
         st.warning("Please upload exactly two CSV files.")
     else:
         file1, file2 = uploaded_files
-        df1 = pd.read_csv(file1)
+        df1 = pd.read_csv(file1, delimiter=';', skiprows=0, low_memory=False)
         df2 = pd.read_csv(file2)
 
         df2.columns = [col.replace(".1", "") for col in df2.columns]
@@ -157,7 +157,7 @@ if uploaded_files:
         bak_filtered, tested_signatures = filter_bak_using_test_flags(
             bak_df, clean_df)
         st.info(
-            f"🧹 Removed {bak_df.shape[0] - clean_df.shape[0]} test takers from .bak")
+            f"🧹 Removed {bak_df.shape[0] - bak_filtered.shape[0]} test takers from .bak")
 
         flagged_bak = add_update_flags(bak_filtered, tested_signatures)
 
