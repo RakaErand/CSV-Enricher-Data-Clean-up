@@ -41,6 +41,8 @@ def get_signature(row):
         ("city", "City"),
         ("state", "State"),
         ("water_type", "WaterType"),
+        ("address", "Addess1"),
+        ("poolVolume", "PoolVolume"),
     ]
 
     sig = []
