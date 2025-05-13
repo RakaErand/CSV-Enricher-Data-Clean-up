@@ -34,26 +34,48 @@ def normalize(val):
     return str(val).strip().lower() if pd.notna(val) else ""
 
 
-def get_signature(row):
-    fields = [
-        ("first_name", "FirstName"),
-        ("last_name", "LastName"),
-        ("city", "City"),
-        ("state", "State"),
-        ("water_type", "WaterType"),
-        ("address", "Addess1"),
-        ("poolVolume", "PoolVolume"),
-    ]
-
-    sig = []
-    for field_opts in fields:
-        value = next((row.get(f) for f in field_opts if f in row), None)
-        sig.append(normalize(value))
-
-    if not any(sig):
+def validate_pool_volume(val):
+    if pd.isna(val):
+        return None
+    try:
+        float_val = float(str(val).strip())
+        return int(float_val) if float_val.is_integer() else float_val
+    except (ValueError, TypeError):
         return None
 
-    return tuple(sig)
+
+def get_signature(row):
+    first_name = normalize(
+        next((row.get(f) for f in ["first_name", "FirstName"] if f in row), ""))
+    if not first_name:
+        return None
+
+    last_name = normalize(next((row.get(f)
+                          for f in ["last_name", "LastName"] if f in row), ""))
+
+    water_type = normalize(
+        next((row.get(f) for f in ["water_type", "WaterType"] if f in row), ""))
+
+    pool_volume = validate_pool_volume(
+        next((row.get(f) for f in ["poolVolume", "PoolVolume"] if f in row), None))
+
+    if last_name:
+        key = (first_name, last_name, water_type, pool_volume)
+    else:
+        key = (first_name, water_type, pool_volume)
+
+    helper_fields = [
+        ("city", "City"),
+        ("state", "State"),
+        ("address", "Addess1"),
+    ]
+
+    helpers = []
+    for field_opts in helper_fields:
+        value = next((row.get(f) for f in field_opts if f in row), "")
+        helpers.append(normalize(value))
+
+    return (key, tuple(helpers))
 
 
 def enrich_target_with_phones(clean_df, target_df):
@@ -80,19 +102,34 @@ def enrich_target_with_phones(clean_df, target_df):
 
 
 def filter_bak_using_test_flags(bak_df, clean_df):
+    clean_df = clean_df.copy()
+    bak_df = bak_df.copy()
+
     clean_df['has_test_taken'] = clean_df['has_test_taken'].astype(
         str).str.strip().str.lower()
     clean_df['has_test_taken'] = clean_df['has_test_taken'].isin(
         ['true', '1', 'yes'])
 
-    tested_signatures = set(
-        get_signature(row) for _, row in clean_df[clean_df['has_test_taken']].iterrows()
-    )
+    tested_keys = set()
+    tested_users = clean_df[clean_df['has_test_taken']
+                            ].iloc[1:]
+    for _, row in tested_users.iterrows():
+        sig = get_signature(row)
+        if sig is not None and sig[0]:
+            tested_keys.add(sig[0])
 
-    filtered_rows = [row.to_dict() for _, row in bak_df.iterrows()
-                     if get_signature(row) not in tested_signatures]
+    filtered_rows = []
+    for _, row in bak_df.iterrows():
+        sig = get_signature(row)
+        if sig is None:
+            filtered_rows.append(row.to_dict())
+            continue
 
-    return pd.DataFrame(filtered_rows), tested_signatures
+        key = sig[0]
+        if key not in tested_keys:
+            filtered_rows.append(row.to_dict())
+
+    return pd.DataFrame(filtered_rows), tested_keys
 
 
 def identify_reimport_candidates(clean_df, bak_signatures):
@@ -115,11 +152,16 @@ def identify_reimport_candidates(clean_df, bak_signatures):
     return pd.DataFrame(reimport_rows)
 
 
-def add_update_flags(bak_df, tested_signatures):
+def add_update_flags(bak_df, tested_keys):
     flagged_rows = []
     for _, row in bak_df.iterrows():
         sig = get_signature(row)
-        if sig not in tested_signatures:
+        if sig is None:
+            flagged_rows.append(row)
+            continue
+
+        key = sig[0]
+        if key not in tested_keys:
             new_row = row.copy()
             new_row["needs_chemical_profile_update"] = "No"
             new_row["eligible_for_reimport"] = "Yes"
@@ -153,15 +195,19 @@ if uploaded_files:
             st.error("❌ Neither file contains a 'has_test_taken' column.")
             st.stop()
 
-        st.success(f"📄 .bak file loaded: {bak_df.shape[0]} rows")
-        st.success(f"✅ Clean file loaded: {clean_df.shape[0]} rows")
+        clean_df = clean_df.reset_index(drop=True)
+        bak_df = bak_df.reset_index(drop=True)
 
-        bak_filtered, tested_signatures = filter_bak_using_test_flags(
+        st.success(f"📄 .bak file loaded: {len(bak_df)} rows")
+        st.success(f"✅ Clean file loaded: {len(clean_df)} rows")
+
+        bak_filtered, tested_keys = filter_bak_using_test_flags(
             bak_df, clean_df)
+        removed_count = len(bak_df) - len(bak_filtered)
         st.info(
-            f"🧹 Removed {bak_df.shape[0] - bak_filtered.shape[0]} test takers from .bak")
+            f"🧹 Removed {removed_count} test takers from .bak")
 
-        flagged_bak = add_update_flags(bak_filtered, tested_signatures)
+        flagged_bak = add_update_flags(bak_filtered, tested_keys)
 
         bak_signatures = set(get_signature(row)
                              for _, row in bak_df.iterrows())
