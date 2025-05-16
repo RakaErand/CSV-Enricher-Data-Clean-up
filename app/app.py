@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import zipfile
 from io import BytesIO
+import re
 from datetime import datetime
 
 
@@ -44,12 +45,27 @@ def validate_pool_volume(val):
         return None
 
 
-def get_signature(row):
+def normalize_phone(phone, is_clean_csv=False):
+    if pd.isna(phone):
+        return None
+    phone = str(phone).strip()
+    phone = ''.join(filter(str.isdigit, phone))
+    if is_clean_csv and len(phone) == 11:
+        phone = phone[1:]
+    return phone if len(phone) == 10 else None
+
+
+def get_signature(row, is_clean_csv=False):
     first_name = normalize(
         next((row.get(f) for f in ["first_name", "FirstName"] if f in row), ""))
     if not first_name:
         return None
-
+    phone = normalize_phone(
+        next((row.get(f) for f in ["phone", "PhoneNumber"] if f in row), None),
+        is_clean_csv
+    )
+    if phone:
+        return ((phone, first_name), None)
     last_name = normalize(next((row.get(f)
                           for f in ["last_name", "LastName"] if f in row), ""))
 
@@ -67,7 +83,7 @@ def get_signature(row):
     helper_fields = [
         ("city", "City"),
         ("state", "State"),
-        ("address", "Addess1"),
+        ("address", "Address1"),
     ]
 
     helpers = []
@@ -83,7 +99,7 @@ def enrich_target_with_phones(clean_df, target_df):
     clean_lookup = {}
 
     for _, row in clean_df.iterrows():
-        sig = get_signature(row)
+        sig = get_signature(row, is_clean_csv=True)
         phone = str(row.get("phone", "")).strip()
         if phone:
             clean_lookup[sig] = phone
@@ -91,7 +107,7 @@ def enrich_target_with_phones(clean_df, target_df):
     for idx, row in target_df.iterrows():
         phone = str(row.get("PhoneNumber", "")).strip()
         if not phone:
-            sig = get_signature(row)
+            sig = get_signature(row, is_clean_csv=False)
             new_phone = clean_lookup.get(sig)
             if new_phone:
                 target_df.at[idx, "PhoneNumber"] = new_phone
@@ -111,16 +127,15 @@ def filter_bak_using_test_flags(bak_df, clean_df):
         ['true', '1', 'yes'])
 
     tested_keys = set()
-    tested_users = clean_df[clean_df['has_test_taken']
-                            ].iloc[1:]
+    tested_users = clean_df[clean_df['has_test_taken']].iloc[1:]
     for _, row in tested_users.iterrows():
-        sig = get_signature(row)
+        sig = get_signature(row, is_clean_csv=True)
         if sig is not None and sig[0]:
             tested_keys.add(sig[0])
 
     filtered_rows = []
     for _, row in bak_df.iterrows():
-        sig = get_signature(row)
+        sig = get_signature(row, is_clean_csv=False)
         if sig is None:
             filtered_rows.append(row.to_dict())
             continue
@@ -184,6 +199,12 @@ if uploaded_files:
         file1, file2 = uploaded_files
         df1 = pd.read_csv(file1, sep=None, engine='python')
         df2 = pd.read_csv(file2, sep=None, engine='python')
+        if 'Pool Store' in df2.columns:
+            poolstore = df2['Pool Store']
+        elif 'Pool Store' in df1.columns:
+            poolstore = df1['Pool Store']
+        else:
+            st.error("'Pool Store' column not found in either file.")
 
         df2.columns = [col.replace(".1", "") for col in df2.columns]
 
@@ -220,7 +241,10 @@ if uploaded_files:
 
         if st.button("Download Cleaned CSV"):
             now = datetime.now().strftime("%Y%m%d_%H%M")
-            output_filename = f"cleaned_flagged_customers_{now}.csv"
+            store_name = poolstore.dropna(
+            ).iloc[0] if not poolstore.dropna().empty else "unknown_store"
+            safe_name = re.sub(r'\W+', '_', store_name.strip())
+            output_filename = f"{safe_name}-cleaned.csv"
             output_csv = final_df.to_csv(index=False)
             st.download_button(
                 label="⬇️ Download Flagged CSV",
