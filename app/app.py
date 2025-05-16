@@ -60,12 +60,7 @@ def get_signature(row, is_clean_csv=False):
         next((row.get(f) for f in ["first_name", "FirstName"] if f in row), ""))
     if not first_name:
         return None
-    phone = normalize_phone(
-        next((row.get(f) for f in ["phone", "PhoneNumber"] if f in row), None),
-        is_clean_csv
-    )
-    if phone:
-        return ((phone, first_name), None)
+
     last_name = normalize(next((row.get(f)
                           for f in ["last_name", "LastName"] if f in row), ""))
 
@@ -127,9 +122,10 @@ def filter_bak_using_test_flags(bak_df, clean_df):
         ['true', '1', 'yes'])
 
     tested_keys = set()
-    tested_users = clean_df[clean_df['has_test_taken']].iloc[1:]
+    tested_users = clean_df[clean_df['has_test_taken']]
+
     for _, row in tested_users.iterrows():
-        sig = get_signature(row, is_clean_csv=True)
+        sig = get_signature(row, is_clean_csv=False)
         if sig is not None and sig[0]:
             tested_keys.add(sig[0])
 
